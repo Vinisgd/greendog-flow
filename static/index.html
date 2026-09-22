@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>GreenDog Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cabin:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Cabin',sans-serif;height:100vh;overflow:hidden;}
+input,textarea,select{outline:none;font-family:'Cabin',sans-serif;}
+button{cursor:pointer;font-family:'Cabin',sans-serif;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+/* ── Paleta Green Dog ─────────────────────────────────────────── */
+.dark{
+  --bg:#0d1a0d;
+  --surface:#152015;
+  --surface2:#1e2e1e;
+  --border:#2d4a2d;
+  --text:#e8f5e2;
+  --muted:#7aaa6a;
+  --accent:#4caf50;
+  --accent2:#8bc34a;
+  --accent-hover:#43a047;
+  --card:#1a2a1a;
+  --input:#0d1a0d;
+  --danger:#ef5350;
+  --warn:#ffc107;
+  --hot:#ff8f00;
+}
+.light{
+  --bg:#fdfaf4;
+  --surface:#ffffff;
+  --surface2:#f4faf0;
+  --border:#d4e8c8;
+  --text:#1a3318;
+  --muted:#5a7a50;
+  --accent:#2e7d32;
+  --accent2:#689f38;
+  --accent-hover:#1b5e20;
+  --card:#ffffff;
+  --input:#f8fbf5;
+  --danger:#e53935;
+  --warn:#f9a825;
+  --hot:#e65100;
+}
+body{background:var(--bg);color:var(--text);}
+</style>
+</head>
+<body class="light">
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef} = React;
+
+// ── API ───────────────────────────────────────────────────────────────────────
+const API = {
+  getToken: () => localStorage.getItem('gd_token'),
+  setToken: (t) => { t ? localStorage.setItem('gd_token',t) : localStorage.removeItem('gd_token'); },
+  async req(method, path, body, isForm=false) {
+    const token = API.getToken();
+    const headers = {};
+    if (token) { headers['X-Token'] = token; headers['Authorization'] = 'Bearer ' + token; }
+    let b;
+    if (body && isForm) b = body;
+    else if (body) { headers['Content-Type'] = 'application/json'; b = JSON.stringify(body); }
+    const r = await fetch('/api' + path, {method, headers, body: b, credentials:'include'});
+    if (!r.ok) { let e; try{e=await r.json();}catch(_){e={detail:r.statusText};} throw e; }
+    return r.json();
+  },
+  get:  p    => API.req('GET', p),
+  post: (p,b)=> API.req('POST', p, b),
+  patch:(p,b)=> API.req('PATCH', p, b),
+  del:  p    => API.req('DELETE', p),
+};
+
+// ── Constantes ────────────────────────────────────────────────────────────────
+const PRIORITY_PT = {CRITICAL:'Crítico',HIGH:'Urgente',MEDIUM:'Normal',LOW:'Baixa'};
+const PRIORITY_COLORS = {CRITICAL:'#ef5350',HIGH:'#ff8f00',MEDIUM:'#ffc107',LOW:'#7aaa6a'};
+const ROLES = ['ADMIN','MANAGER','MEMBER','VIEWER'];
+const ROLES_PT = {ADMIN:'Administrador',MANAGER:'Gerente',MEMBER:'Membro',VIEWER:'Visualizador'};
+
+// ── Utilitários visuais ───────────────────────────────────────────────────────
+function Avatar({name='?', color='#2e7d32', size=32}) {
+  const i = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  return <div style={{width:size,height:size,borderRadius:'50%',background:color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*.38,fontWeight:700,color:'#fff',flexShrink:0}}>{i}</div>;
+}
+
+function Badge({label, color='#2e7d32'}) {
+  return <span style={{background:color+'22',color,border:`1px solid ${color}44`,borderRadius:20,padding:'2px 8px',fontSize:11,fontWeight:700}}>{label}</span>;
+}
+
+function Btn({children,onClick,variant='primary',small,disabled,full,style={}}) {
+  const base = {border:'none',borderRadius:8,fontWeight:700,cursor:disabled?'not-allowed':'pointer',
+    opacity:disabled?.55:1,fontSize:small?12:14,padding:small?'5px 12px':'9px 18px',
+    transition:'all .15s',width:full?'100%':undefined,...style};
+  const v = {
+    primary:  {background:'var(--accent)',color:'#fff'},
+    secondary:{background:'var(--border)',color:'var(--text)'},
+    danger:   {background:'#ef535022',color:'var(--danger)',border:'1px solid #ef535044'},
+    ghost:    {background:'transparent',color:'var(--muted)'},
+    accent2:  {background:'var(--accent2)',color:'#fff'},
+  };
+  return <button onClick={disabled?undefined:onClick} style={{...base,...(v[variant]||v.primary)}}>{children}</button>;
+}
+
+function Modal({title,onClose,children,width=500}) {
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'#00000077',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16,padding:28,width,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 8px 40px #0005'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <h2 style={{fontSize:18,fontWeight:700}}>{title}</h2>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'var(--muted)',fontSize:22,lineHeight:1,cursor:'pointer'}}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({label,children}) {
+  return <div style={{marginBottom:14}}>
+    {label && <label style={{display:'block',fontSize:11,fontWeight:700,color:'var(--muted)',marginBottom:5,textTransform:'uppercase',letterSpacing:.6}}>{label}</label>}
+    {children}
+  </div>;
+}
+
+function Input({label,...props}) {
+  return <Field label={label}>
+    <input {...props} style={{width:'100%',padding:'9px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:14,...(props.style||{})}}/>
+  </Field>;
+}
+
+function Sel({label,value,onChange,options=[]}) {
+  return <Field label={label}>
+    <select value={value} onChange={onChange} style={{width:'100%',padding:'9px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:14}}>
+      {options.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+    </select>
+  </Field>;
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+function LoginPage({onLogin}) {
+  const [email,setEmail]=useState('admin@acme.com');
+  const [pass,setPass]=useState('admin123');
+  const [err,setErr]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  async function submit(e) {
+    e && e.preventDefault();
+    if(loading) return;
+    setErr(''); setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('username',email); fd.append('password',pass);
+      const r = await fetch('/api/auth/login',{method:'POST',body:fd,credentials:'include'});
+      if(!r.ok){const e2=await r.json();throw new Error(e2.detail||'Erro');}
+      const data = await r.json();
+      API.setToken(data.access_token);
+      onLogin(data.user);
+    } catch(e){setErr(e.message||'Email ou senha inválidos');}
+    finally{setLoading(false);}
+  }
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)'}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:20,padding:44,width:400,boxShadow:'0 4px 32px #0002'}}>
+        <div style={{textAlign:'center',marginBottom:32}}>
+          <div style={{fontSize:52,marginBottom:4}}>🌭</div>
+          <h1 style={{fontSize:28,fontWeight:700,color:'var(--accent)',letterSpacing:-.5}}>GreenDog Flow</h1>
+          <p style={{color:'var(--muted)',fontSize:14,marginTop:6}}>Sistema de gestão interno</p>
+        </div>
+        <form onSubmit={submit}>
+          <Input label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/>
+          <Input label="Senha" type="password" value={pass} onChange={e=>setPass(e.target.value)} required/>
+          {err && <p style={{color:'var(--danger)',fontSize:13,marginBottom:12,background:'#ef535011',padding:'8px 12px',borderRadius:8}}>{err}</p>}
+          <Btn onClick={submit} disabled={loading} full style={{padding:12}}>{loading?'Entrando...':'Entrar 🌭'}</Btn>
+        </form>
+        <div style={{marginTop:20,padding:14,background:'var(--surface2)',borderRadius:10,fontSize:12,color:'var(--muted)'}}>
+          <strong>Acessos de teste</strong><br/>
+          admin@acme.com / admin123
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({user}) {
+  const [data,setData]=useState(null);
+  const [err,setErr]=useState('');
+  useEffect(()=>{API.get('/dashboard').then(setData).catch(e=>setErr(e.detail||'Erro'));},[]);
+
+  if(err) return <div style={{padding:24,color:'var(--danger)'}}>{err}</div>;
+  if(!data) return <div style={{padding:24,color:'var(--muted)'}}>Carregando...</div>;
+
+  const statCards = [
+    {label:'Minhas Tarefas', value:data.my_tasks.length, color:'var(--accent)', icon:'📋'},
+    {label:'Atrasadas',      value:data.overdue_count,   color:'var(--danger)', icon:'⚠️'},
+    ...(data.by_priority.CRITICAL?[{label:'Críticas', value:data.by_priority.CRITICAL, color:'#ef5350', icon:'🔴'}]:[]),
+    ...(data.by_priority.HIGH?[{label:'Urgentes',  value:data.by_priority.HIGH,     color:'var(--hot)', icon:'🔥'}]:[]),
+    ...(data.by_priority.MEDIUM?[{label:'Normais',   value:data.by_priority.MEDIUM,   color:'var(--warn)', icon:'🟡'}]:[]),
+  ];
+
+  return (
+    <div style={{padding:24,overflowY:'auto',height:'100%'}}>
+      <h1 style={{fontSize:22,fontWeight:700,marginBottom:20}}>
+        Olá, {user.name.split(' ')[0]}! 🌭
+      </h1>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:28}}>
+        {statCards.map((c,i)=>(
+          <div key={i} style={{background:'var(--surface)',border:`1px solid ${c.color}44`,borderRadius:14,padding:'16px 20px'}}>
+            <div style={{fontSize:26,marginBottom:4}}>{c.icon}</div>
+            <div style={{fontSize:30,fontWeight:700,color:c.color}}>{c.value}</div>
+            <div style={{color:'var(--muted)',fontSize:13}}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+      <h2 style={{fontSize:16,fontWeight:700,marginBottom:12}}>Minhas Tarefas</h2>
+      {data.my_tasks.length===0 && <p style={{color:'var(--muted)'}}>Nenhuma tarefa atribuída a você por enquanto.</p>}
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {data.my_tasks.map(t=>{
+          const overdue = t.due_date && new Date(t.due_date+'T00:00') < new Date();
+          return (
+            <div key={t.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',display:'flex',alignItems:'center',gap:12,borderLeft:`4px solid ${PRIORITY_COLORS[t.priority]||'#ccc'}`}}>
+              <span style={{fontSize:13,fontWeight:600,color:PRIORITY_COLORS[t.priority]}}>{PRIORITY_PT[t.priority]}</span>
+              <span style={{flex:1,fontSize:14}}>{t.title}</span>
+              {t.due_date && <span style={{fontSize:12,color:overdue?'var(--danger)':'var(--muted)',fontWeight:overdue?700:400}}>{overdue?'⚠️ ':''}{t.due_date}</span>}
+              <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                {(t.labels||[]).map(l=><Badge key={l.label_id} label={l.name} color={l.color}/>)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Labels (gerenciamento) ────────────────────────────────────────────────────
+function LabelsManager({user}) {
+  const [labels,setLabels]=useState([]);
+  const [editing,setEditing]=useState(null);
+  const [confirmDel,setConfirmDel]=useState(null); // id to confirm delete
+  const [newLabel,setNewLabel]=useState({name:'',color:'#2e7d32'});
+  const [showNew,setShowNew]=useState(false);
+  const canEdit = ['ADMIN','MANAGER'].includes(user.global_role);
+
+  const load = () => API.get('/labels').then(setLabels).catch(console.error);
+  useEffect(()=>{load();},[]);
+
+  async function saveEdit() {
+    await API.patch(`/labels/${editing.id}`, {name:editing.name, color:editing.color});
+    setEditing(null); load();
+  }
+
+  async function createLabel() {
+    if(!newLabel.name.trim()) return;
+    await API.post('/labels', newLabel);
+    setNewLabel({name:'',color:'#2e7d32'}); setShowNew(false); load();
+  }
+
+  async function deleteLabel(id) {
+    await API.del(`/labels/${id}`);
+    setConfirmDel(null); load();
+  }
+
+  return (
+    <div style={{padding:24,overflowY:'auto',height:'100%'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <h1 style={{fontSize:20,fontWeight:700}}>🏷️ Labels</h1>
+        {canEdit && <Btn onClick={()=>setShowNew(true)}>+ Nova Label</Btn>}
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {labels.map(l=>(
+          <div key={l.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+            {editing?.id===l.id ? (
+              <>
+                <input type="color" value={editing.color} onChange={e=>setEditing(v=>({...v,color:e.target.value}))} style={{width:36,height:32,borderRadius:6,border:'1px solid var(--border)',cursor:'pointer'}}/>
+                <input value={editing.name} onChange={e=>setEditing(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&saveEdit()}
+                  style={{flex:1,padding:'6px 10px',borderRadius:8,border:'1px solid var(--accent)',background:'var(--input)',color:'var(--text)',fontSize:14}}/>
+                <Btn small onClick={saveEdit}>Salvar</Btn>
+                <Btn small variant="secondary" onClick={()=>setEditing(null)}>Cancelar</Btn>
+              </>
+            ) : (
+              <>
+                <span style={{width:24,height:24,borderRadius:'50%',background:l.color,flexShrink:0,display:'inline-block'}}/>
+                <span style={{flex:1,fontWeight:600,fontSize:14}}>{l.name}</span>
+                <Badge label={l.name} color={l.color}/>
+                {canEdit && <>
+                  <Btn small variant="secondary" onClick={()=>setEditing({...l})}>✏️ Editar</Btn>
+                  <Btn small variant="danger" onClick={()=>setConfirmDel(l.id)}>🗑️</Btn>
+                </>}
+              </>
+            )}
+          </div>
+        ))}
+        {labels.length===0 && <p style={{color:'var(--muted)'}}>Nenhuma label cadastrada.</p>}
+      </div>
+
+      {confirmDel && (
+        <Modal title="Excluir Label" onClose={()=>setConfirmDel(null)} width={360}>
+          <p style={{marginBottom:20,color:'var(--text)'}}>Tem certeza que deseja excluir esta label? Ela será removida de todas as tarefas.</p>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <Btn variant="secondary" onClick={()=>setConfirmDel(null)}>Cancelar</Btn>
+            <Btn variant="danger" onClick={()=>deleteLabel(confirmDel)}>Excluir</Btn>
+          </div>
+        </Modal>
+      )}
+      {showNew && (
+        <Modal title="Nova Label" onClose={()=>setShowNew(false)}>
+          <Field label="Cor">
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <input type="color" value={newLabel.color} onChange={e=>setNewLabel(v=>({...v,color:e.target.value}))} style={{width:44,height:36,borderRadius:8,border:'1px solid var(--border)',cursor:'pointer'}}/>
+              <span style={{fontSize:13,color:'var(--muted)'}}>{newLabel.color}</span>
+            </div>
+          </Field>
+          <Input label="Nome da Label" value={newLabel.name} onChange={e=>setNewLabel(v=>({...v,name:e.target.value}))} placeholder="Ex: Urgente, Treinamento..." autoFocus/>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <Btn variant="secondary" onClick={()=>setShowNew(false)}>Cancelar</Btn>
+            <Btn onClick={createLabel}>Criar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Espaços ───────────────────────────────────────────────────────────────────
+function SpaceList({user,onSelectSpace}) {
+  const [spaces,setSpaces]=useState([]);
+  const [allUsers,setAllUsers]=useState([]);
+  const [showCreate,setShowCreate]=useState(false);
+  const [form,setForm]=useState({name:'',description:'',member_ids:[]});
+  const [err,setErr]=useState('');
+  const isAdmin = user.global_role==='ADMIN';
+
+  const load=()=>API.get('/spaces').then(setSpaces).catch(e=>setErr(e.detail||'Erro'));
+  useEffect(()=>{
+    load();
+    if(isAdmin) API.get('/users').then(us=>setAllUsers(us.filter(u=>u.id!==user.id&&u.is_active))).catch(()=>{});
+  },[]);
+
+  function toggleMember(uid) {
+    setForm(f=>({...f,member_ids:f.member_ids.includes(uid)?f.member_ids.filter(x=>x!==uid):[...f.member_ids,uid]}));
+  }
+
+  async function create() {
+    if(!form.name.trim()){setErr('Informe um nome');return;}
+    try{
+      const s=await API.post('/spaces',{name:form.name.trim(),description:form.description.trim(),icon:'🏪',member_ids:form.member_ids});
+      setSpaces(p=>[...p,s]); setShowCreate(false); setForm({name:'',description:'',member_ids:[]}); setErr('');
+    }catch(e){setErr(e.detail||'Erro ao criar');}
+  }
+
+  return (
+    <div style={{padding:24,overflowY:'auto',height:'100%'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+        <h1 style={{fontSize:20,fontWeight:700}}>🏪 Espaços de Trabalho</h1>
+        {isAdmin && <Btn onClick={()=>setShowCreate(true)}>+ Novo Espaço</Btn>}
+      </div>
+      {err && <p style={{color:'var(--danger)',marginBottom:12}}>{err}</p>}
+      {spaces.length===0 && !err && (
+        <div style={{padding:40,textAlign:'center',color:'var(--muted)'}}>
+          <div style={{fontSize:48,marginBottom:12}}>🏪</div>
+          <p style={{fontWeight:600}}>{isAdmin?'Nenhum espaço criado ainda.':'Você ainda não tem acesso a nenhum espaço.'}</p>
+          {isAdmin && <p style={{fontSize:13,marginTop:6}}>Clique em "+ Novo Espaço" para criar o primeiro.</p>}
+        </div>
+      )}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))',gap:16}}>
+        {spaces.map(s=>(
+          <div key={s.id} onClick={()=>onSelectSpace(s)}
+            style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:22,cursor:'pointer',transition:'all .2s'}}
+            onMouseOver={e=>{e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.background='var(--surface2)';}}
+            onMouseOut={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.background='var(--surface)';}}>
+            <div style={{fontSize:32,marginBottom:8}}>{s.icon||'🏪'}</div>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{s.name}</div>
+            <div style={{fontSize:13,color:'var(--muted)'}}>{s.description||'Sem descrição'}</div>
+          </div>
+        ))}
+      </div>
+
+      {showCreate && (
+        <Modal title="Novo Espaço de Trabalho" onClose={()=>{setShowCreate(false);setErr('');setForm({name:'',description:'',member_ids:[]});}}>
+          <Input label="Nome do Espaço" value={form.name} onChange={e=>setForm(v=>({...v,name:e.target.value}))} placeholder="Ex: Cozinha, Atendimento, Loja..." autoFocus/>
+          <Input label="Descrição (opcional)" value={form.description} onChange={e=>setForm(v=>({...v,description:e.target.value}))} placeholder="Do que se trata este espaço?"/>
+          <Field label={`Quem terá acesso? (${form.member_ids.length} selecionado${form.member_ids.length!==1?'s':''})`}>
+            <div style={{maxHeight:200,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,padding:8,display:'flex',flexDirection:'column',gap:4}}>
+              {allUsers.length===0 && <p style={{color:'var(--muted)',fontSize:13,padding:'4px 8px'}}>Nenhum outro usuário cadastrado.</p>}
+              {allUsers.map(u=>{
+                const sel=form.member_ids.includes(u.id);
+                return (
+                  <div key={u.id} onClick={()=>toggleMember(u.id)}
+                    style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',borderRadius:8,cursor:'pointer',background:sel?'var(--accent)18':'transparent',border:`1px solid ${sel?'var(--accent)':'transparent'}`,transition:'all .15s'}}>
+                    <div style={{width:18,height:18,borderRadius:4,border:`2px solid ${sel?'var(--accent)':'var(--border)'}`,background:sel?'var(--accent)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      {sel && <span style={{color:'#fff',fontSize:12,fontWeight:900}}>✓</span>}
+                    </div>
+                    <Avatar name={u.name} color={u.avatar_color} size={24}/>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,lineHeight:1}}>{u.name}</div>
+                      <div style={{fontSize:11,color:'var(--muted)'}}>{ROLES_PT[u.global_role]}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Field>
+          {err && <p style={{color:'var(--danger)',fontSize:13,background:'#ef535011',padding:'8px 12px',borderRadius:8,marginBottom:12}}>{err}</p>}
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <Btn variant="secondary" onClick={()=>{setShowCreate(false);setErr('');setForm({name:'',description:'',member_ids:[]});}}>Cancelar</Btn>
+            <Btn onClick={create}>Criar Espaço</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Quadros do Espaço ─────────────────────────────────────────────────────────
+function SpaceView({space,user,onSelectBoard,onBack}) {
+  const [boards,setBoards]=useState([]);
+  const [showCreate,setShowCreate]=useState(false);
+  const [name,setName]=useState('');
+  const canCreate=['ADMIN','MANAGER'].includes(user.global_role);
+
+  useEffect(()=>{API.get(`/spaces/${space.id}/boards`).then(setBoards).catch(console.error);},[space.id]);
+
+  async function create() {
+    if(!name.trim()) return;
+    const b=await API.post(`/spaces/${space.id}/boards`,{name:name.trim()});
+    setBoards(p=>[...p,b]); setShowCreate(false); setName('');
+  }
+
+  return (
+    <div style={{padding:24,overflowY:'auto',height:'100%'}}>
+      <button onClick={onBack} style={{background:'none',border:'none',color:'var(--accent)',fontSize:13,cursor:'pointer',marginBottom:14,fontWeight:600}}>← Voltar aos Espaços</button>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+        <h1 style={{fontSize:20,fontWeight:700}}>{space.icon||'🏪'} {space.name}</h1>
+        {canCreate && <Btn onClick={()=>setShowCreate(true)}>+ Novo Quadro</Btn>}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:16}}>
+        {boards.map(b=>(
+          <div key={b.id} onClick={()=>onSelectBoard(b)}
+            style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:22,cursor:'pointer',transition:'all .2s'}}
+            onMouseOver={e=>{e.currentTarget.style.borderColor='var(--accent)';}}
+            onMouseOut={e=>{e.currentTarget.style.borderColor='var(--border)';}}>
+            <div style={{fontSize:28,marginBottom:8}}>📋</div>
+            <div style={{fontWeight:700,fontSize:15}}>{b.name}</div>
+          </div>
+        ))}
+        {boards.length===0 && <p style={{color:'var(--muted)'}}>Nenhum quadro criado ainda.</p>}
+      </div>
+      {showCreate && (
+        <Modal title="Novo Quadro Kanban" onClose={()=>setShowCreate(false)}>
+          <Input label="Nome do Quadro" value={name} onChange={e=>setName(e.target.value)} placeholder="Ex: Tarefas da Semana" autoFocus/>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <Btn variant="secondary" onClick={()=>setShowCreate(false)}>Cancelar</Btn>
+            <Btn onClick={create}>Criar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Modal de Tarefa ───────────────────────────────────────────────────────────
+function TaskModal({taskId,onClose,onUpdated,allUsers=[],allLabels=[],currentUser}) {
+  const [task,setTask]=useState(null);
+  const [edit,setEdit]=useState({});
+  const [comment,setComment]=useState('');
+  const canEdit=['ADMIN','MANAGER','MEMBER'].includes(currentUser.global_role);
+
+  const load=useCallback(()=>{
+    if(taskId) API.get(`/tasks/${taskId}`).then(t=>{setTask(t);setEdit({title:t.title,description:t.description||'',priority:t.priority,due_date:t.due_date||''});}).catch(console.error);
+  },[taskId]);
+  useEffect(()=>{load();},[load]);
+
+  async function save(){if(!canEdit)return;const u=await API.patch(`/tasks/${taskId}`,edit);setTask(u);onUpdated&&onUpdated();}
+  async function addComment(){if(!comment.trim())return;await API.post(`/tasks/${taskId}/comments`,{content:comment.trim()});setComment('');load();}
+  async function toggleAssignee(uid){const has=task.assignees.some(a=>a.user_id===uid);has?await API.del(`/tasks/${taskId}/assignees/${uid}`):await API.post(`/tasks/${taskId}/assignees`,{user_id:uid});load();}
+  async function toggleLabel(lid){const has=task.labels.some(l=>l.label_id===lid);has?await API.del(`/tasks/${taskId}/labels/${lid}`):await API.post(`/tasks/${taskId}/labels`,{label_id:lid});load();}
+
+  if(!task) return null;
+
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'#00000077',zIndex:1000,display:'flex',justifyContent:'flex-end'}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:520,background:'var(--surface)',height:'100%',overflowY:'auto',padding:24,borderLeft:'1px solid var(--border)',boxShadow:'-4px 0 24px #0003'}}>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:16}}>
+          <span style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>Detalhes da Tarefa</span>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'var(--muted)',fontSize:22,cursor:'pointer'}}>×</button>
+        </div>
+        <textarea value={edit.title||''} onChange={e=>setEdit(v=>({...v,title:e.target.value}))} readOnly={!canEdit} rows={2}
+          style={{width:'100%',fontSize:17,fontWeight:700,background:'transparent',border:'none',color:'var(--text)',resize:'none',marginBottom:14,lineHeight:1.4,fontFamily:'Cabin,sans-serif'}}/>
+        <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
+          <select value={edit.priority||'MEDIUM'} onChange={e=>setEdit(v=>({...v,priority:e.target.value}))} disabled={!canEdit}
+            style={{padding:'5px 10px',borderRadius:8,border:`2px solid ${PRIORITY_COLORS[edit.priority]||'#ccc'}`,background:'var(--input)',color:PRIORITY_COLORS[edit.priority]||'var(--text)',fontSize:13,fontWeight:700,fontFamily:'Cabin,sans-serif'}}>
+            {Object.entries(PRIORITY_PT).map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select>
+          <input type="date" value={edit.due_date||''} onChange={e=>setEdit(v=>({...v,due_date:e.target.value}))} readOnly={!canEdit}
+            style={{padding:'5px 10px',borderRadius:8,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:13}}/>
+          {canEdit && <Btn small onClick={save}>💾 Salvar</Btn>}
+        </div>
+        <textarea value={edit.description||''} onChange={e=>setEdit(v=>({...v,description:e.target.value}))} readOnly={!canEdit} rows={3}
+          placeholder="Adicionar descrição..."
+          style={{width:'100%',padding:'10px',borderRadius:8,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',resize:'vertical',marginBottom:16,fontSize:13,fontFamily:'Cabin,sans-serif'}}/>
+
+        {/* Responsáveis */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:.6,marginBottom:8}}>👤 Responsáveis</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {allUsers.map(u=>{
+              const on=task.assignees.some(a=>a.user_id===u.id);
+              return <div key={u.id} onClick={canEdit?()=>toggleAssignee(u.id):undefined}
+                style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:20,border:`2px solid ${on?u.avatar_color:'var(--border)'}`,cursor:canEdit?'pointer':'default',opacity:on?1:.6,transition:'all .15s'}}>
+                <Avatar name={u.name} color={u.avatar_color} size={18}/>
+                <span style={{fontSize:12,fontWeight:600}}>{u.name.split(' ')[0]}</span>
+              </div>;
+            })}
+          </div>
+        </div>
+
+        {/* Labels */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:.6,marginBottom:8}}>🏷️ Labels</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {allLabels.map(l=>{
+              const on=task.labels.some(tl=>tl.label_id===l.id);
+              return <span key={l.id} onClick={canEdit?()=>toggleLabel(l.id):undefined}
+                style={{padding:'3px 12px',borderRadius:20,border:`2px solid ${on?l.color:'var(--border)'}`,background:on?l.color+'22':'transparent',color:on?l.color:'var(--muted)',fontSize:12,cursor:canEdit?'pointer':'default',fontWeight:on?700:400,transition:'all .15s'}}>
+                {l.name}
+              </span>;
+            })}
+            {allLabels.length===0 && <span style={{fontSize:12,color:'var(--muted)'}}>Sem labels cadastradas</span>}
+          </div>
+        </div>
+
+        {/* Comentários */}
+        <div>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:.6,marginBottom:10}}>💬 Comentários</div>
+          {task.comments.map(c=>(
+            <div key={c.id} style={{display:'flex',gap:10,marginBottom:12}}>
+              <Avatar name={c.user?.name||'?'} color={c.user?.avatar_color||'#2e7d32'} size={28}/>
+              <div style={{flex:1,background:'var(--surface2)',borderRadius:8,padding:'8px 12px'}}>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:3}}>{c.user?.name} <span style={{color:'var(--muted)',fontWeight:400}}>{c.created_at?.slice(0,10)}</span></div>
+                <div style={{fontSize:13}}>{c.content}</div>
+              </div>
+            </div>
+          ))}
+          <div style={{display:'flex',gap:8,marginTop:8}}>
+            <input value={comment} onChange={e=>setComment(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addComment();}}}
+              placeholder="Escrever comentário... (Enter para enviar)"
+              style={{flex:1,padding:'8px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:13,fontFamily:'Cabin,sans-serif'}}/>
+            <Btn small onClick={addComment}>Enviar</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Quadro Kanban (com Drag & Drop nativo) ───────────────────────────────────
+function BoardView({board:init,user,onBack}) {
+  const [board,setBoard]=useState(null);
+  const [allUsers,setAllUsers]=useState([]);
+  const [allLabels,setAllLabels]=useState([]);
+  const [selectedTask,setSelectedTask]=useState(null);
+  const [newCol,setNewCol]=useState(null);
+  const [newTitle,setNewTitle]=useState('');
+  const canEdit=['ADMIN','MANAGER','MEMBER'].includes(user.global_role);
+
+  const reload=useCallback(()=>{API.get(`/boards/${init.id}`).then(setBoard).catch(console.error);},[init.id]);
+  useEffect(()=>{reload();API.get('/users').then(setAllUsers);API.get('/labels').then(setAllLabels);},[reload]);
+
+  async function moveTask(tid,cid){await API.patch(`/tasks/${tid}`,{column_id:cid});reload();}
+  async function createTask(cid){
+    if(!newTitle.trim())return;
+    await API.post('/tasks',{board_id:init.id,column_id:cid,title:newTitle.trim(),priority:'MEDIUM'});
+    setNewTitle('');setNewCol(null);reload();
+  }
+
+  if(!board) return <div style={{padding:24,color:'var(--muted)'}}>Carregando quadro...</div>;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+      <div style={{padding:'14px 24px',borderBottom:'1px solid var(--border)',flexShrink:0,background:'var(--surface)'}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:'var(--accent)',fontSize:13,cursor:'pointer',marginBottom:4,fontWeight:600}}>← Voltar</button>
+        <h1 style={{fontSize:18,fontWeight:700}}>📋 {board.name}</h1>
+      </div>
+      <div style={{display:'flex',gap:14,padding:18,overflowX:'auto',flex:1,alignItems:'flex-start'}}>
+        {(board.columns||[]).map(col=>{
+          const tasks=(board.tasks||[]).filter(t=>t.column_id===col.id).sort((a,b)=>a.position-b.position);
+          const others=(board.columns||[]).filter(c=>c.id!==col.id);
+          return (
+            <div key={col.id} style={{minWidth:260,width:260,flexShrink:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'0 2px'}}>
+                <div style={{width:12,height:12,borderRadius:'50%',background:col.color,flexShrink:0}}/>
+                <span style={{fontWeight:700,fontSize:14,flex:1}}>{col.name}</span>
+                <span style={{background:'var(--border)',borderRadius:10,padding:'1px 8px',fontSize:12,color:'var(--muted)',fontWeight:700}}>{tasks.length}</span>
+              </div>
+              <div
+                style={{display:'flex',flexDirection:'column',gap:8,minHeight:60,borderRadius:8,transition:'background .15s'}}
+                onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='move';e.currentTarget.style.background='var(--accent)11';}}
+                onDragLeave={e=>{e.currentTarget.style.background='transparent';}}
+                onDrop={e=>{e.preventDefault();e.currentTarget.style.background='transparent';const tid=e.dataTransfer.getData('taskId');if(tid)moveTask(tid,col.id);}}>
+                {tasks.map(t=>(
+                  <div key={t.id}
+                    draggable={canEdit}
+                    onDragStart={e=>{e.dataTransfer.setData('taskId',t.id);e.dataTransfer.effectAllowed='move';e.currentTarget.style.opacity='.5';}}
+                    onDragEnd={e=>{e.currentTarget.style.opacity='1';}}
+                    onClick={()=>setSelectedTask(t.id)}
+                    style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:12,cursor:canEdit?'grab':'pointer',borderLeft:`3px solid ${PRIORITY_COLORS[t.priority]||'#ccc'}`,transition:'border-color .15s'}}
+                    onMouseOver={e=>e.currentTarget.style.borderColor='var(--accent)'}
+                    onMouseOut={e=>e.currentTarget.style.borderColor='var(--border)'}>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:6,lineHeight:1.4}}>{t.title}</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}}>
+                      {(t.labels||[]).map(l=><Badge key={l.label_id} label={l.name} color={l.color}/>)}
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <div style={{display:'flex'}}>
+                        {(t.assignees||[]).slice(0,3).map((a,i)=><div key={a.user_id} style={{marginLeft:i?-8:0}}><Avatar name={a.name||'?'} color={a.avatar_color||'#2e7d32'} size={22}/></div>)}
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{fontSize:11,fontWeight:700,color:PRIORITY_COLORS[t.priority]}}>{PRIORITY_PT[t.priority]}</span>
+                        {t.due_date && <span style={{fontSize:10,color:new Date(t.due_date+'T00:00')<new Date()?'var(--danger)':'var(--muted)'}}>{t.due_date}</span>}
+                      </div>
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+              {canEdit && (newCol===col.id ? (
+                <div style={{marginTop:8}}>
+                  <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} autoFocus
+                    onKeyDown={e=>{if(e.key==='Enter')createTask(col.id);if(e.key==='Escape'){setNewCol(null);setNewTitle('');}}}
+                    placeholder="Nome da tarefa... (Enter)" style={{width:'100%',padding:'8px 10px',borderRadius:8,border:'1px solid var(--accent)',background:'var(--input)',color:'var(--text)',fontSize:13,fontFamily:'Cabin,sans-serif'}}/>
+                  <div style={{display:'flex',gap:6,marginTop:6}}>
+                    <Btn small onClick={()=>createTask(col.id)}>Criar</Btn>
+                    <Btn small variant="ghost" onClick={()=>{setNewCol(null);setNewTitle('');}}>×</Btn>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={()=>setNewCol(col.id)} style={{marginTop:8,width:'100%',padding:'8px',borderRadius:8,border:'1px dashed var(--border)',background:'transparent',color:'var(--muted)',fontSize:13,cursor:'pointer',fontFamily:'Cabin,sans-serif'}}>
+                  + Nova tarefa
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      {selectedTask && <TaskModal taskId={selectedTask} onClose={()=>setSelectedTask(null)} onUpdated={reload} allUsers={allUsers} allLabels={allLabels} currentUser={user}/>}
+    </div>
+  );
+}
+
+// ── Usuários ──────────────────────────────────────────────────────────────────
+function AdminUsers({user:me}) {
+  const [users,setUsers]=useState([]);
+  const [editing,setEditing]=useState(null);
+  const [confirmToggle,setConfirmToggle]=useState(null); // {user, action}
+  const [showInvite,setShowInvite]=useState(false);
+  const [form,setForm]=useState({name:'',email:'',password:'greendog123',global_role:'MEMBER',avatar_color:'#2e7d32'});
+  const [err,setErr]=useState('');
+  const isAdmin=me.global_role==='ADMIN';
+
+  const load=()=>API.get('/users').then(setUsers).catch(e=>setErr(e.detail||'Erro'));
+  useEffect(()=>{load();},[]);
+
+  async function save(u) {
+    const updated=await API.patch(`/users/${u.id}`,{global_role:u.global_role,is_active:u.is_active,name:u.name});
+    setUsers(p=>p.map(x=>x.id===updated.id?updated:x)); setEditing(null);
+  }
+
+  async function toggleActive(u) {
+    const updated=await API.patch(`/users/${u.id}`,{is_active:!u.is_active});
+    setUsers(p=>p.map(x=>x.id===updated.id?updated:x));
+    setConfirmToggle(null);
+  }
+
+  async function invite() {
+    if(!form.name||!form.email){setErr('Preencha nome e email');return;}
+    try{
+      const u=await API.post('/users/invite',form);
+      setUsers(p=>[...p,u]); setShowInvite(false); setForm({name:'',email:'',password:'greendog123',global_role:'MEMBER',avatar_color:'#2e7d32'}); setErr('');
+    }catch(e){setErr(e.detail||'Erro ao criar usuário');}
+  }
+
+  return (
+    <div style={{padding:24,overflowY:'auto',height:'100%'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+        <h1 style={{fontSize:20,fontWeight:700}}>👥 Equipe</h1>
+        {isAdmin && <Btn onClick={()=>{setShowInvite(true);setErr('');}}>+ Adicionar Membro</Btn>}
+      </div>
+      {err && !showInvite && <p style={{color:'var(--danger)',marginBottom:12}}>{err}</p>}
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead>
+            <tr style={{borderBottom:'2px solid var(--border)',background:'var(--surface2)'}}>
+              {['Membro','Email','Cargo','Status',''].map(h=>(
+                <th key={h} style={{padding:'12px 16px',textAlign:'left',fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:.5}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u=>(
+              <tr key={u.id} style={{borderBottom:'1px solid var(--border)',transition:'background .1s'}}
+                onMouseOver={e=>e.currentTarget.style.background='var(--surface2)'}
+                onMouseOut={e=>e.currentTarget.style.background='transparent'}>
+                <td style={{padding:'12px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <Avatar name={u.name} color={u.avatar_color} size={34}/>
+                    {editing?.id===u.id ? (
+                      <input value={editing.name} onChange={e=>setEditing(v=>({...v,name:e.target.value}))}
+                        style={{padding:'5px 8px',borderRadius:6,border:'1px solid var(--accent)',background:'var(--input)',color:'var(--text)',fontSize:14,fontFamily:'Cabin,sans-serif',width:150}}/>
+                    ) : (
+                      <span style={{fontWeight:600,fontSize:14}}>{u.name}</span>
+                    )}
+                  </div>
+                </td>
+                <td style={{padding:'12px 16px',fontSize:13,color:'var(--muted)'}}>{u.email}</td>
+                <td style={{padding:'12px 16px'}}>
+                  {editing?.id===u.id ? (
+                    <select value={editing.global_role} onChange={e=>setEditing(v=>({...v,global_role:e.target.value}))}
+                      style={{padding:'4px 8px',borderRadius:6,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:13,fontFamily:'Cabin,sans-serif'}}>
+                      {ROLES.map(r=><option key={r} value={r}>{ROLES_PT[r]}</option>)}
+                    </select>
+                  ) : (
+                    <Badge label={ROLES_PT[u.global_role]||u.global_role}
+                      color={u.global_role==='ADMIN'?'#ef5350':u.global_role==='MANAGER'?'var(--hot)':u.global_role==='MEMBER'?'var(--accent)':'var(--muted)'}/>
+                  )}
+                </td>
+                <td style={{padding:'12px 16px'}}>
+                  {editing?.id===u.id ? (
+                    <select value={editing.is_active?'1':'0'} onChange={e=>setEditing(v=>({...v,is_active:e.target.value==='1'}))}
+                      style={{padding:'4px 8px',borderRadius:6,border:'1px solid var(--border)',background:'var(--input)',color:'var(--text)',fontSize:13,fontFamily:'Cabin,sans-serif'}}>
+                      <option value="1">Ativo</option>
+                      <option value="0">Inativo</option>
+                    </select>
+                  ) : (
+                    <span style={{fontWeight:700,fontSize:13,color:u.is_active?'var(--accent)':'var(--danger)'}}>{u.is_active?'✅ Ativo':'❌ Inativo'}</span>
+                  )}
+                </td>
+                <td style={{padding:'12px 16px'}}>
+                  {isAdmin && u.id!==me.id && (editing?.id===u.id ? (
+                    <div style={{display:'flex',gap:6}}>
+                      <Btn small onClick={()=>save(editing)}>Salvar</Btn>
+                      <Btn small variant="secondary" onClick={()=>setEditing(null)}>Cancelar</Btn>
+                    </div>
+                  ) : (
+                    <div style={{display:'flex',gap:6}}>
+                      <Btn small variant="secondary" onClick={()=>setEditing({...u})}>✏️ Editar</Btn>
+                      <Btn small variant={u.is_active?'danger':'accent2'} onClick={()=>setConfirmToggle({user:u,action:u.is_active?'desativar':'ativar'})}>
+                        {u.is_active?'🚫 Desativar':'✅ Ativar'}
+                      </Btn>
+                    </div>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {confirmToggle && (
+        <Modal title={confirmToggle.action==='desativar'?'Desativar Usuário':'Ativar Usuário'} onClose={()=>setConfirmToggle(null)} width={380}>
+          <p style={{marginBottom:8,color:'var(--text)'}}>
+            {confirmToggle.action==='desativar'
+              ? `Desativar ${confirmToggle.user.name}? O usuário perderá acesso ao sistema.`
+              : `Reativar ${confirmToggle.user.name}? O usuário voltará a ter acesso.`}
+          </p>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}}>
+            <Btn variant="secondary" onClick={()=>setConfirmToggle(null)}>Cancelar</Btn>
+            <Btn variant={confirmToggle.action==='desativar'?'danger':'primary'} onClick={()=>toggleActive(confirmToggle.user)}>
+              {confirmToggle.action==='desativar'?'Desativar':'Ativar'}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+      {showInvite && (
+        <Modal title="Adicionar Membro da Equipe" onClose={()=>{setShowInvite(false);setErr('');}}>
+          <Input label="Nome completo" value={form.name} onChange={e=>setForm(v=>({...v,name:e.target.value}))} placeholder="Ex: João Silva" autoFocus/>
+          <Input label="Email" type="email" value={form.email} onChange={e=>setForm(v=>({...v,email:e.target.value}))} placeholder="joao@greendog.com.br"/>
+          <Input label="Senha inicial" value={form.password} onChange={e=>setForm(v=>({...v,password:e.target.value}))}/>
+          <Sel label="Cargo" value={form.global_role} onChange={e=>setForm(v=>({...v,global_role:e.target.value}))}
+            options={ROLES.map(r=>({v:r,l:ROLES_PT[r]}))}/>
+          <Field label="Cor do Avatar">
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <input type="color" value={form.avatar_color} onChange={e=>setForm(v=>({...v,avatar_color:e.target.value}))} style={{width:44,height:36,borderRadius:8,border:'1px solid var(--border)',cursor:'pointer'}}/>
+              <Avatar name={form.name||'??'} color={form.avatar_color} size={36}/>
+              <span style={{fontSize:13,color:'var(--muted)'}}>{form.name||'Preview'}</span>
+            </div>
+          </Field>
+          {err && <p style={{color:'var(--danger)',fontSize:13,background:'#ef535011',padding:'8px 12px',borderRadius:8,marginBottom:12}}>{err}</p>}
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <Btn variant="secondary" onClick={()=>{setShowInvite(false);setErr('');}}>Cancelar</Btn>
+            <Btn onClick={invite}>Adicionar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── App Root ──────────────────────────────────────────────────────────────────
+function App() {
+  const [user,setUser]=useState(null);
+  const [dark,setDark]=useState(()=>localStorage.getItem('gd_theme')==='dark');
+  const [page,setPage]=useState('dashboard');
+  const [space,setSpace]=useState(null);
+  const [board,setBoard]=useState(null);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    document.body.className=dark?'dark':'light';
+    localStorage.setItem('gd_theme',dark?'dark':'light');
+  },[dark]);
+
+  useEffect(()=>{
+    const token=API.getToken();
+    if(token){API.get('/auth/me').then(u=>setUser(u)).catch(()=>API.setToken(null)).finally(()=>setLoading(false));}
+    else setLoading(false);
+  },[]);
+
+  function logout(){API.setToken(null);setUser(null);setPage('dashboard');}
+
+  if(loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:'var(--muted)',fontSize:16}}>🌭 Carregando...</div>;
+  if(!user) return <LoginPage onLogin={u=>{setUser(u);setPage('dashboard');}}/>;
+
+  const NAV=[
+    {id:'dashboard',icon:'📊',label:'Dashboard'},
+    {id:'spaces',   icon:'🏪',label:'Espaços'},
+    {id:'labels',   icon:'🏷️',label:'Labels'},
+    ...(user.global_role==='ADMIN'?[{id:'users',icon:'👥',label:'Equipe'}]:[]),
+  ];
+
+  function Main(){
+    if(page==='dashboard') return <Dashboard user={user}/>;
+    if(page==='labels')    return <LabelsManager user={user}/>;
+    if(page==='users')     return <AdminUsers user={user}/>;
+    if(page==='spaces'){
+      if(board) return <BoardView board={board} user={user} onBack={()=>setBoard(null)}/>;
+      if(space) return <SpaceView space={space} user={user} onSelectBoard={b=>{setBoard(b);}} onBack={()=>setSpace(null)}/>;
+      return <SpaceList user={user} onSelectSpace={s=>{setSpace(s);setBoard(null);}}/>;
+    }
+    return null;
+  }
+
+  return (
+    <div style={{display:'flex',height:'100vh',overflow:'hidden'}}>
+      {/* Sidebar */}
+      <div style={{width:220,flexShrink:0,background:'var(--surface)',borderRight:'1px solid var(--border)',display:'flex',flexDirection:'column'}}>
+        {/* Logo */}
+        <div style={{padding:'20px 16px 16px',borderBottom:'1px solid var(--border)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:26}}>🌭</span>
+            <div>
+              <div style={{fontWeight:700,fontSize:15,color:'var(--accent)',lineHeight:1}}>GreenDog</div>
+              <div style={{fontSize:12,color:'var(--muted)',letterSpacing:.5}}>Flow</div>
+            </div>
+          </div>
+        </div>
+        {/* Nav */}
+        <nav style={{flex:1,padding:10}}>
+          {NAV.map(n=>(
+            <button key={n.id}
+              onClick={()=>{setPage(n.id);if(n.id!=='spaces'){setSpace(null);setBoard(null);}}}
+              style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',borderRadius:10,border:'none',
+                background:page===n.id?'var(--accent)22':'transparent',
+                color:page===n.id?'var(--accent)':'var(--text)',
+                fontWeight:page===n.id?700:500,fontSize:14,cursor:'pointer',marginBottom:2,
+                fontFamily:'Cabin,sans-serif',transition:'all .15s'}}>
+              <span style={{fontSize:16}}>{n.icon}</span>{n.label}
+              {page===n.id && <div style={{marginLeft:'auto',width:4,height:18,borderRadius:2,background:'var(--accent)'}}/>}
+            </button>
+          ))}
+        </nav>
+        {/* User */}
+        <div style={{padding:14,borderTop:'1px solid var(--border)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+            <Avatar name={user.name} color={user.avatar_color} size={34}/>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:700,lineHeight:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</div>
+              <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{ROLES_PT[user.global_role]||user.global_role}</div>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:6}}>
+            <Btn small variant="ghost" onClick={()=>setDark(d=>!d)} style={{flex:1,fontSize:11}}>{dark?'☀️ Claro':'🌙 Escuro'}</Btn>
+            <Btn small variant="danger" onClick={logout} style={{fontSize:11}}>Sair</Btn>
+          </div>
+        </div>
+      </div>
+      {/* Main */}
+      <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
+        <Main/>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
